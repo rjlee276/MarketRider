@@ -3,11 +3,21 @@ from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.live import CryptoDataStream 
 from datetime import datetime, timedelta
+from alpaca.trading.client import TradingClient
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+paper_key = os.getenv('PAPER_KEY')
+paper_secret = os.getenv('PAPER_SECRET')
 
 long_period = 30
 short_period = 27
 
-# No keys required for crypto data
+trading_client = TradingClient(paper_key, paper_secret, paper=True)
+account = trading_client.get_account()
+
 client = CryptoHistoricalDataClient()
 
 while True:
@@ -36,6 +46,7 @@ while True:
         btc_bars = client.get_crypto_bars(request_params)
 
         # Convert to dataframe
+        #print(btc_bars.data)
         short_period_tot += btc_bars.data['BTC/USD'][0].close
         now = now - day
 
