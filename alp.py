@@ -1,9 +1,10 @@
 from alpaca.data.historical import CryptoHistoricalDataClient
-from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
+from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest, MarketOrderRequest
 from alpaca.data.timeframe import TimeFrame
-from alpaca.data.live import CryptoDataStream 
-from datetime import datetime, timedelta
+from alpaca.data.live import CryptoDataStream
 from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import OrderSide, TimeInForce 
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 
@@ -14,9 +15,12 @@ paper_secret = os.getenv('PAPER_SECRET')
 
 long_period = 30
 short_period = 27
+risk_perc = 1
+stoploss = 2
 
 trading_client = TradingClient(paper_key, paper_secret, paper=True)
 account = trading_client.get_account()
+print(account.cash)
 
 client = CryptoHistoricalDataClient()
 
@@ -74,8 +78,27 @@ while True:
     print(long_sma)
 
     if short_sma > long_sma:
+        cash = account.cash
+        risk_amount = cash * (risk_perc / 100)
+
+        stop_price = latest_quote["BTC/USD"].ask_price * (1.0 - stoploss)
+        risk_per_share = latest_quote["BTC/USD"].ask_price - stop_price
+        size = risk_amount / risk_per_share
+
+        market_order_data = MarketOrderRequest(
+                    symbol="BTC/USD",
+                    qty=size,
+                    side=OrderSide.BUY,
+                    time_in_force=TimeInForce.GTC
+                    )
+
+        # Market order
+        market_order = trading_client.submit_order(
+                        order_data=market_order_data
+                    )
+    
+    else:
         pass
-  
 
 # For websocket
 """
