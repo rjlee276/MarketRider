@@ -2,11 +2,11 @@ import os
 import time
 from alpaca.data.historical import CryptoHistoricalDataClient
 from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, StopLossRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.live import CryptoDataStream
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce 
+from alpaca.trading.enums import OrderSide, TimeInForce , OrderType
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -22,9 +22,10 @@ SYMBOL = 'BTC/USD'
 # PARAMETERS FOR TRADING
 LONG = timedelta(days=30)
 SHORT = timedelta(days=27)
-RISK_PERCENT = 5
+RISK_PERCENT = 1
 STOP_LOSS = 2
 STOP_LOSS_PRICE = float('inf')
+STOP_LOSS_SHARES = 0
 
 RUNNING_SHORT_SMA = []
 RUNNING_LONG_SMA = []
@@ -32,7 +33,7 @@ RUNNING_LONG_SMA = []
 trading_client = TradingClient(PAPER_KEY, PAPER_SECRET, paper=True)
 account = trading_client.get_account()
 client = CryptoHistoricalDataClient()
-
+buy_in_shares = 1
 
 def wait_for_next_minute():
     """Wait until the start of the next minute."""
@@ -47,7 +48,6 @@ while True:
     request_params = CryptoLatestQuoteRequest(symbol_or_symbols="BTC/USD")
     current_price = client.get_crypto_latest_quote(request_params)[SYMBOL].ask_price
     print(f'Current {SYMBOL} Price: ${current_price}')
-
     current_date = datetime.now()
 
     # SHORT SMA
@@ -71,10 +71,19 @@ while True:
         print('----------No Previous Data, Waiting for next minute----------')
         continue
 
+    if current_price < STOP_LOSS_PRICE:
+        print(f'----------Selling {SYMBOL} Due To Stop Loss----------')
+        market_order_data = MarketOrderRequest(symbol=SYMBOL, qty=STOP_LOSS_SHARES, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
+        market_order = trading_client.submit_order(order_data=market_order_data) 
+        STOP_LOSS_PRICE = float('inf')
+        STOP_LOSS_SHARES = 0
+  
+
     # SHORT SMA goes UNDER LONG SMA, we sell
     if RUNNING_SHORT_SMA[-2] > RUNNING_LONG_SMA[-2] and RUNNING_SHORT_SMA[-1] < RUNNING_LONG_SMA[-1]:
         print(f'----------Selling {SYMBOL}----------')
-        trading_client.close_position(symbol_or_asset_id=SYMBOL)
+        trading_client.close_all_positions()
+        continue
         
     
     # SHORT SMA goes OVER LONG SMA, we BUY
@@ -83,9 +92,11 @@ while True:
         STOP_LOSS_PRICE = current_price * (1 - (STOP_LOSS/100))
         buy_in_dollars = account.cash * (RISK_PERCENT / 100)
         buy_in_shares = buy_in_dollars/current_price
+        STOP_LOSS_SHARES = buy_in_shares
 
         market_order_data = MarketOrderRequest(symbol=SYMBOL, qty=buy_in_shares, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
-        market_order = trading_client.submit_order(order_data=market_order_data)    
+        market_order = trading_client.submit_order(order_data=market_order_data)  
+        continue  
         
     print('----------No Activity----------')
     
