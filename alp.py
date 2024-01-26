@@ -24,7 +24,7 @@ LONG = timedelta(days=30)
 SHORT = timedelta(days=27)
 RISK_PERCENT = 1
 STOP_LOSS = 2
-STOP_LOSS_PRICE = float('inf')
+STOP_LOSS_PRICE = 0
 STOP_LOSS_SHARES = 0
 
 RUNNING_SHORT_SMA = []
@@ -33,7 +33,6 @@ RUNNING_LONG_SMA = []
 trading_client = TradingClient(PAPER_KEY, PAPER_SECRET, paper=True)
 account = trading_client.get_account()
 client = CryptoHistoricalDataClient()
-buy_in_shares = 1
 
 def wait_for_next_minute():
     """Wait until the start of the next minute."""
@@ -67,15 +66,19 @@ while True:
     RUNNING_SHORT_SMA.append(short_sma)
     RUNNING_LONG_SMA.append(long_sma)
 
+    print(f'Running SMA DATA\nLONG SMA: {RUNNING_LONG_SMA}\nSHORT SMA: {RUNNING_SHORT_SMA}')
+
     if len(RUNNING_LONG_SMA) < 2 or len(RUNNING_SHORT_SMA) < 2:
         print('----------No Previous Data, Waiting for next minute----------')
         continue
 
     if current_price < STOP_LOSS_PRICE:
         print(f'----------Selling {SYMBOL} Due To Stop Loss----------')
+        print(f'----------Stop Loss Price: ${STOP_LOSS_PRICE}----------')
+        print(f'----------Stop Loss Shares: {STOP_LOSS_SHARES}----------')
         market_order_data = MarketOrderRequest(symbol=SYMBOL, qty=STOP_LOSS_SHARES, side=OrderSide.SELL, time_in_force=TimeInForce.GTC)
         market_order = trading_client.submit_order(order_data=market_order_data) 
-        STOP_LOSS_PRICE = float('inf')
+        STOP_LOSS_PRICE = 0
         STOP_LOSS_SHARES = 0
   
 
@@ -93,6 +96,8 @@ while True:
         buy_in_dollars = account.cash * (RISK_PERCENT / 100)
         buy_in_shares = buy_in_dollars/current_price
         STOP_LOSS_SHARES = buy_in_shares
+        print(f'----------Set Stop Loss Price: ${STOP_LOSS_PRICE}----------')
+        print(f'----------Set Stop Loss Shares: {STOP_LOSS_SHARES}----------')
 
         market_order_data = MarketOrderRequest(symbol=SYMBOL, qty=buy_in_shares, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
         market_order = trading_client.submit_order(order_data=market_order_data)  
