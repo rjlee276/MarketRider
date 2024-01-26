@@ -1,104 +1,94 @@
+import os
+import time
 from alpaca.data.historical import CryptoHistoricalDataClient
-from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest, MarketOrderRequest
+from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
+from alpaca.trading.requests import MarketOrderRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.live import CryptoDataStream
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce 
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import os
+
 
 load_dotenv()
 
-paper_key = os.getenv('PAPER_KEY')
-paper_secret = os.getenv('PAPER_SECRET')
+# CONSTANTS
+PAPER_KEY = os.getenv('PAPER_KEY')
+PAPER_SECRET = os.getenv('PAPER_SECRET')
+SYMBOL = 'BTC/USD'
 
-long_period = 30
-short_period = 27
-risk_perc = 1
-stoploss = 2
 
-trading_client = TradingClient(paper_key, paper_secret, paper=True)
+# PARAMETERS FOR TRADING
+LONG = timedelta(days=30)
+SHORT = timedelta(days=27)
+RISK_PERCENT = 5
+STOP_LOSS = 2
+STOP_LOSS_PRICE = float('inf')
+
+RUNNING_SHORT_SMA = []
+RUNNING_LONG_SMA = []
+
+trading_client = TradingClient(PAPER_KEY, PAPER_SECRET, paper=True)
 account = trading_client.get_account()
-print(account.cash)
-
 client = CryptoHistoricalDataClient()
 
+
+def wait_for_next_minute():
+    """Wait until the start of the next minute."""
+    now = datetime.now()
+    # Calculate the number of seconds until the next minute
+    seconds_to_wait = 60 - now.second + (10**6 - now.microsecond) / 10**6
+    time.sleep(seconds_to_wait)
+
 while True:
+    wait_for_next_minute()
+    print(f'Total Cash Balance: ${account.cash}')
     request_params = CryptoLatestQuoteRequest(symbol_or_symbols="BTC/USD")
+    current_price = client.get_crypto_latest_quote(request_params)[SYMBOL].ask_price
+    print(f'Current {SYMBOL} Price: ${current_price}')
 
-    latest_quote = client.get_crypto_latest_quote(request_params)
+    current_date = datetime.now()
 
-    # must use symbol to access even though it is single symbol
-    short_period_tot = latest_quote["BTC/USD"].ask_price
+    # SHORT SMA
+    request_params = CryptoBarsRequest(symbol_or_symbols=[SYMBOL], timeframe=TimeFrame.Minute, start=current_date-SHORT, end=current_date)
+    short_sma_bars = client.get_crypto_bars(request_params).data[SYMBOL]
 
-    day = timedelta(days=1)
-    now = datetime.now() - day
-    minute= timedelta(minutes=5)
+    short_sma = sum(item.close for item in short_sma_bars) / len(short_sma_bars)
+    print(f'Current Short SMA: {short_sma}')
 
-    # Creating request object
-    for x in range(short_period-1):
-        print(now)
-        request_params = CryptoBarsRequest(
-                                symbol_or_symbols=["BTC/USD"],
-                                timeframe=TimeFrame.Minute,
-                                start=now-minute,
-                                end=now
-                                )
 
-        # Retrieve daily bars for Bitcoin in a DataFrame and printing it
-        btc_bars = client.get_crypto_bars(request_params)
+    request_params = CryptoBarsRequest(symbol_or_symbols=[SYMBOL], timeframe=TimeFrame.Minute, start=current_date-LONG, end=current_date-SHORT)
+    long_sma_bars = client.get_crypto_bars(request_params).data[SYMBOL]
 
-        # Convert to dataframe
-        #print(btc_bars.data)
-        short_period_tot += btc_bars.data['BTC/USD'][0].close
-        now = now - day
+    long_sma = sum(item.close for item in long_sma_bars) / len(long_sma_bars)
+    print(f'Current Long SMA: {long_sma}')
 
-    long_period_tot = short_period_tot
+    RUNNING_SHORT_SMA.append(short_sma)
+    RUNNING_LONG_SMA.append(long_sma)
 
-    for x in range(long_period - short_period):
-        request_params = CryptoBarsRequest(
-                                symbol_or_symbols=["BTC/USD"],
-                                timeframe=TimeFrame.Minute,
-                                start=now-minute,
-                                end=now
-                                )
+    if len(RUNNING_LONG_SMA) < 2 or len(RUNNING_SHORT_SMA) < 2:
+        print('----------No Previous Data, Waiting for next minute----------')
+        continue
 
-        # Retrieve daily bars for Bitcoin in a DataFrame and printing it
-        btc_bars = client.get_crypto_bars(request_params)
-
-        # Convert to dataframe
-        long_period_tot += btc_bars.data['BTC/USD'][0].close
-        now = now - day
+    # SHORT SMA goes UNDER LONG SMA, we sell
+    if RUNNING_SHORT_SMA[-2] > RUNNING_LONG_SMA[-2] and RUNNING_SHORT_SMA[-1] < RUNNING_LONG_SMA[-1]:
+        print(f'----------Selling {SYMBOL}----------')
+        trading_client.close_position(symbol_or_asset_id=SYMBOL)
+        
     
-    short_sma = short_period_tot / short_period
-    long_sma = long_period_tot / long_period
+    # SHORT SMA goes OVER LONG SMA, we BUY
+    if RUNNING_SHORT_SMA[-2] < RUNNING_LONG_SMA[-2] and  RUNNING_SHORT_SMA[-1] > RUNNING_LONG_SMA[-1]:
+        print(f'----------Buying {SYMBOL}----------')
+        STOP_LOSS_PRICE = current_price * (1 - (STOP_LOSS/100))
+        buy_in_dollars = account.cash * (RISK_PERCENT / 100)
+        buy_in_shares = buy_in_dollars/current_price
 
-    print(short_sma)
-    print(long_sma)
-
-    if short_sma > long_sma:
-        cash = account.cash
-        risk_amount = cash * (risk_perc / 100)
-
-        stop_price = latest_quote["BTC/USD"].ask_price * (1.0 - stoploss)
-        risk_per_share = latest_quote["BTC/USD"].ask_price - stop_price
-        size = risk_amount / risk_per_share
-
-        market_order_data = MarketOrderRequest(
-                    symbol="BTC/USD",
-                    qty=size,
-                    side=OrderSide.BUY,
-                    time_in_force=TimeInForce.GTC
-                    )
-
-        # Market order
-        market_order = trading_client.submit_order(
-                        order_data=market_order_data
-                    )
+        market_order_data = MarketOrderRequest(symbol=SYMBOL, qty=buy_in_shares, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
+        market_order = trading_client.submit_order(order_data=market_order_data)    
+        
+    print('----------No Activity----------')
     
-    else:
-        pass
 
 # For websocket
 """
