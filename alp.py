@@ -102,7 +102,9 @@ while True:
         market_order_data = MarketOrderRequest(symbol=SYMBOL, qty=buy_in_shares, side=OrderSide.BUY, time_in_force=TimeInForce.GTC)
         market_order = trading_client.submit_order(order_data=market_order_data)  
         continue  
-        
+    RUNNING_SHORT_SMA.pop(0)
+    RUNNING_LONG_SMA.pop(0)
+
     print('----------No Activity----------')
     
 
